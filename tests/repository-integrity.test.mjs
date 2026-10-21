@@ -47,7 +47,7 @@ test('HTML entry point loads the stylesheet', () => {
   assert.match(read('public/index.html'), /style\.css/);
 });
 
-test('service worker file is non-empty and has an install/fetch lifecycle', () => {
+test('service worker file has an install or fetch lifecycle handler', () => {
   assert.match(read('public/sw.js'), /addEventListener\s*\(\s*['"](install|fetch)['"]/);
 });
 
@@ -55,8 +55,10 @@ test('worker contains explicit API routing', () => {
   assert.match(read('src/worker.js'), /\/api\//);
 });
 
-test('schema enables or explicitly configures foreign-key relationships', () => {
-  assert.match(read('schema.sql'), /FOREIGN KEY|PRAGMA foreign_keys/i);
+test('schema declares primary keys and uniqueness constraints', () => {
+  const schema = read('schema.sql');
+  assert.match(schema, /PRIMARY KEY/i);
+  assert.match(schema, /UNIQUE/i);
 });
 
 test('public source does not embed common private-key/token formats', () => {
@@ -72,6 +74,6 @@ test('public source does not embed common private-key/token formats', () => {
   }
 });
 
-test('worker source does not contain a hard-coded live-looking secret key', () => {
+test('worker source does not contain a hard-coded private key', () => {
   assert.doesNotMatch(read('src/worker.js'), /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/);
 });
