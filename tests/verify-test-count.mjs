@@ -49,14 +49,14 @@ for (const suite of expectedSuites) {
   }
 
   const output = readFileSync(path.join(reportDir, file), 'utf8');
-  // Node's TAP output reports each passing test as "ok N - ...".
-  const nodeChecks = (output.match(/^ok\s+\d+\s+-/gm) || []).length;
-  // Python unittest reports the count in its final "Ran N tests" summary.
-  const pythonSummary = output.match(/^Ran (\d+) tests?$/m);
+  // Count both the project's custom "ok   description" output and standard TAP "ok N - description".
+  const nodeChecks = (output.match(/^(?:ok\s{2,}\S|ok\s+\d+\s+-)/gm) || []).length;
+  // Python unittest prefixes its "Ran N tests" summary with a timestamp in CI logs.
+  const pythonSummary = output.match(/Ran (\d+) tests?/i);
   const count = nodeChecks + (pythonSummary ? Number(pythonSummary[1]) : 0);
 
   if (count === 0) failures.push(`${suite} produced no individually countable test results`);
-  if (statusBySuite.get(suite) === 0 && /not ok\s+\d+\s+-/.test(output)) {
+  if (statusBySuite.get(suite) === 0 && /^not ok\s+\d+\s+-/m.test(output)) {
     failures.push(`${suite} log contains a TAP failure despite a successful exit code`);
   }
 
