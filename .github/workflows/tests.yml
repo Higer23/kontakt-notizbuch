@@ -100,7 +100,24 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
       - name: Validate JSON and essential project files
         run: node tests/repository-integrity.test.mjs
+
+  # Legacy branch rules may still require the exact status-check name "test".
+  # This aggregate check preserves that name and fails if any quality gate fails.
+  test:
+    name: test
+    if: always()
+    needs: [tests, dependency-audit, repository-integrity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every quality gate to pass
+        env:
+          TESTS_RESULT: ${{ needs.tests.result }}
+          AUDIT_RESULT: ${{ needs['dependency-audit'].result }}
+          INTEGRITY_RESULT: ${{ needs['repository-integrity'].result }}
+        shell: bash
+        run: |
+          printf 'Tests: %s\nDependency audit: %s\nRepository integrity: %s\n' "$TESTS_RESULT" "$AUDIT_RESULT" "$INTEGRITY_RESULT"
+          [[ "$TESTS_RESULT" == "success" && "$AUDIT_RESULT" == "success" && "$INTEGRITY_RESULT" == "success" ]]
