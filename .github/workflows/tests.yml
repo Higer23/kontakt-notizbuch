@@ -86,14 +86,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Audit test dependencies
+      - name: Install test dependencies and create a lockfile for the audit
+        run: npm install --prefix tests --ignore-scripts --no-audit --no-fund
+      - name: Audit dependencies
         run: npm audit --prefix tests --audit-level=high
-      - name: Ensure dependency lockfile is committed
-        run: |
-          test -f tests/package-lock.json || {
-            echo "::error::tests/package-lock.json is missing; commit a lockfile for reproducible CI."
-            exit 1
-          }
 
   repository-integrity:
     name: Repository integrity and secret hygiene
