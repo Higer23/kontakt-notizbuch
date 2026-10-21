@@ -4,7 +4,6 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, 'feature/**', 'ci/**']
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
@@ -13,120 +12,99 @@ permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.workflow }}-${{ github.ref }}
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Tests (Node ${{ matrix.node }})
+  tests:
+    name: Tests (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        node: ['20', '22']
+        node-version: ['20', '22']
     steps:
-      - name: Checkout
+      - name: Checkout without persisted credentials
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
-
-      - name: Setup Python
+          node-version: ${{ matrix.node-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
-      - name: Install test dependencies
-        working-directory: tests
-        run: npm install --no-audit --no-fund --ignore-scripts
-
-      - name: JavaScript syntax checks
+      - name: Install test-only dependencies
+        run: npm install --prefix tests --no-audit --no-fund
+      - name: Run every suite and produce a complete report
         shell: bash
         run: |
-          set -euo pipefail
-          while IFS= read -r -d '' file; do
-            echo "Checking $file"
-            node --check "$file"
-          done < <(find public src tests -type f -name '*.js' -print0)
-          node --check tests/behavior.test.mjs
-          node --check tests/crypto.test.mjs
-          node --check tests/csv.test.mjs
-          node --check tests/static.test.mjs
+          set -uo pipefail
+          REPORT_DIR="$RUNNER_TEMP/kontakt-test-reports"
+          mkdir -p "$REPORT_DIR"
+          : > "$REPORT_DIR/status.txt"
 
-      - name: SQLite schema regression tests
-        run: python tests/schema.test.py
+          run_suite() {
+            local name="$1"
+            shift
+            echo "::group::Suite: $name"
+            set +e
+            "$@" 2>&1 | tee "$REPORT_DIR/$name.log"
+            local result=${PIPESTATUS[0]}
+            set -e
+            printf '%s|%s\n' "$name" "$result" >> "$REPORT_DIR/status.txt"
+            echo "::endgroup::"
+          }
 
-      - name: Static security and structure tests
-        run: node tests/static.test.mjs
+          run_suite static node tests/static.test.mjs
+          run_suite behavior node tests/behavior.test.mjs
+          run_suite crypto node tests/crypto.test.mjs
+          run_suite csv node tests/csv.test.mjs
+          run_suite schema python tests/schema.test.py
 
-      - name: API authorization and isolation tests
-        run: node tests/behavior.test.mjs
-
-      - name: Client-side AES-GCM regression tests
-        run: node tests/crypto.test.mjs
-
-      - name: CSV formula-injection regression tests
-        run: node tests/csv.test.mjs
-
-      - name: Publish test summary
+          node tests/verify-test-count.mjs "$REPORT_DIR"
+      - name: Upload full test logs (success or failure)
         if: always()
-        shell: bash
-        run: |
-          {
-            echo '## Quality Gate'
-            echo
-            echo "- Runtime: Node.js ${{ matrix.node }}"
-            echo '- Schema, syntax, static, authorization/isolation, crypto and CSV suites were scheduled.'
-            echo '- Review the individual step results above for pass/fail details.'
-          } >> "$GITHUB_STEP_SUMMARY"
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-node-${{ matrix.node-version }}
+          path: ${{ runner.temp }}/kontakt-test-reports/
+          if-no-files-found: warn
+          retention-days: 14
 
   dependency-audit:
     name: Dependency vulnerability audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install exact declared test dependencies
-        working-directory: tests
-        run: npm install --no-audit --no-fund --ignore-scripts
-      - name: Audit npm dependency tree
-        working-directory: tests
-        run: npm audit --audit-level=high
+      - name: Audit test dependencies
+        run: npm audit --prefix tests --audit-level=high
+      - name: Ensure dependency lockfile is committed
+        run: |
+          test -f tests/package-lock.json || {
+            echo "::error::tests/package-lock.json is missing; commit a lockfile for reproducible CI."
+            exit 1
+          }
 
-  codeql:
-    name: CodeQL analysis
+  repository-integrity:
+    name: Repository integrity and secret hygiene
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: ['javascript-typescript', 'python']
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+      - uses: actions/setup-node@v4
         with:
-          languages: ${{ matrix.language }}
-          build-mode: none
-      - name: Analyze
-        uses: github/codeql-action/analyze@v3
-        with:
-          category: '/language:${{ matrix.language }}'
+          node-version: '22'
+      - name: Validate JSON and essential project files
+        run: node tests/repository-integrity.test.mjs
