@@ -1,5 +1,5 @@
 # Automated test and quality gates
-
+<!-- CI smoke test: automatic quality checks -->
 The repository uses GitHub Actions to run a required-style quality gate on pull requests targeting `main`, on pushes to branches, on a weekly schedule, and on manual dispatch. The workflow **does not merge or deploy changes**. You review and approve the pull request after checks finish.
 
 ## What runs
